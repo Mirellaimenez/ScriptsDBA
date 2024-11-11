@@ -1,0 +1,39 @@
+-- Acesso as pastas a qual os db estão armazenados (datafile)
+
+select name, filename from sysdatabases 
+
+-- Acesso a todos os datafiles e onde estão armazenados. Devido ao Join, é disponibilizado também o nome das bases
+
+select MF.database_id
+,SD.name
+,MF.physical_name 
+,MF.NAME
+from sys.master_files MF
+INNER JOIN sys.databases SD ON
+MF.database_id = SD.database_id
+order by physical_name
+
+-- Acesso as pastas a qual os db estão armazenados(log)
+
+SELECT DB.name as Name, S.filename
+FROM sysdatabases DB
+INNER JOIN sysaltfiles S
+ON DB.dbid = S.dbid
+order by 1
+
+-- Script para visualização do tamanho do data base
+
+SELECT DB.name as Name, REPLACE(cast(SUM(size) * 8./1024/1024 as DECIMAL (8,3)) ,'.',',')AS Size_MB
+FROM sysdatabases DB
+INNER JOIN sysaltfiles
+ON DB.dbid = sysaltfiles.dbid
+GROUP BY DB.name
+order by 1
+
+-- Script para verificar o status do database (usado em casos de validação)
+
+select name as Database_Name,filename, 
+DatabasePropertyEx(name,'Status') as Database_Status from sysdatabases;
+
+
+
