@@ -1,0 +1,88 @@
+-- Ver ultimo backup realizado
+Select max(backup_start_date) From backupset
+Where database_name = 'AdventureWorks'
+
+-- BACKUP DATABASE
+BACKUP DATABASE [databasename] to disk ='M:\B\B\filename.bak' with stats =5, copy_only, compression
+copy_only -> opcional, não interfere na rotina de backup da base
+- Podemos adcionar o compression
+
+
+-- Backup a qual o arquivo. bak será armazenado em outro servidor: seguimos a mesma query, porém no diretório, iremos apontar o servidor e a pasta do servidor:
+to disk = '\\server\file\arquivo.bak'
+
+-- Backup do Banco de Dados ADVENTUREWORKS (FULL)
+BACKUP DATABASE AdventureWorks TO DISK = 'D:\Alex\SQL Server\Backups\bkp_AdventureWorks.bak'
+	WITH NOFORMAT -- Especifica que a operação de backup preserva o cabeçalho da mídia e os conjuntos de backup existentes nos volumes de mídia usados para esta operação de backup. Esse é o comportamento padrão.
+,	COMPRESSION -- Comprime o Backup
+,	INIT -- Controla se a operação de backup anexa ou substitui os conjuntos de backup existentes na mídia de backup. O padrão é anexar ao backup mais recente definido na mídia (NOINIT).
+,	NAME = 'AdventureWorks' -- Nome do conjunto de backup
+,	SKIP -- Desabilita a verificação de validade e nome do conjunto de backup que normalmente é executada pela instrução BACKUP para impedir a substituição de conjuntos de backup.
+,	NOREWIND -- Especifica que o SQL Server mantém a fita aberta após a operação de backup.
+,	NOUNLOAD -- Especifica que depois da operação BACKUP a fita permanecerá carregada na unidade de fita.
+,	STATS = 10 -- Porcentagem concluída
+GO
+
+-- Backup do Banco de Dados ADVENTUREWORKS (DIFERENCIAL)
+BACKUP DATABASE AdventureWorks TO DISK = 'D:\Alex\SQL Server\Backups\bkp_AdventuteWorks_dif.bak'
+WITH DIFFERENTIAL, NOFORMAT, INIT, Name = 'AdventureWorks - Differential', SKIP, NOREWIND, NOUNLOAD, STATS = 25
+GO
+OU
+BACKUP DATABASE AdventureWorks TO DISK = 'C:\Backups\AdventureWorks_Diferencial1.bak' WITH DIFFERENTIAL;
+
+-- Backup do Banco de Dados ADVENTUREWORKS (LOG)
+BACKUP LOG AdventureWorks TO  DISK = 'D:\Alex\SQL Server\Backups\bkp_AdventuteWorks_Log.bak' 
+WITH NOFORMAT, INIT, NAME = N'AdventureWorks -Log',	SKIP, NOREWIND,	NOUNLOAD, STATS = 10
+GO
+OU
+BACKUP LOG AdventureWorks TO DISK = 'C:\Backups\AdventureWorks_Log_4.bak';
+
+-- RESTORE DATABASE
+
+restore database [db_name]
+from disk = 'arquivo'
+with replace, move 'filename' to 'diretório com disco',
+move 'filename' to 'diretório com disco',  
+move 'filename' to 'diretório com disco',
+move 'filename' to 'diretório com disco',
+move 'filename'to 'diretório com disco',
+stats = 10
+go
+
+-- RESTORE
+RESTORE DATABASE AdventureWorks FROM DISK = 'D:\Alex\SQL Server\Backups\bkp_AdventureWorks.bak'
+WITH REPLACE
+,	 NORECOVERY -- Deixa aberto para recuperar um proximo backup
+,	 STATS=10
+
+RESTORE LOG AdventureWorks FROM  DISK = 'D:\Alex\SQL Server\Backups\bkp_AdventuteWorks_Log.bak'
+WITH RECOVERY
+,	 STATS = 10 
+
+
+-- VERIFICAÇÃO DOS ARQUIVOS LOGICOS E FISICOS DOS DATABASES--
+
+CREATE TABLE #TEMPDATAFILES(
+[database] varchar (300),
+[filename] varchar(300),
+[path] varchar(300),
+[Currently Allocated Space (MB)] varchar(300),
+[Space Used (MB)] varchar(300),
+[Available Space (MB)] varchar(300),
+[Available Percentage %] decimal(15,2))
+exec sp_msforeachdb @command1= N' use[?] insert into #TEMPDATAFILES SELECT DB_NAME(),name,filename,
+convert(varchar(300),CONVERT(Decimal(15,2),ROUND(a.Size/128.000,2))) [Currently Allocated Space (MB)],
+convert(varchar(300),CONVERT(Decimal(15,2),ROUND(FILEPROPERTY(a.Name,''SpaceUsed'')/128.000,2))) AS [Space Used (MB)],
+convert(varchar(300),CONVERT(Decimal(15,2),ROUND((a.Size-FILEPROPERTY(a.Name,''SpaceUsed''))/128.000,2))) AS [Available Space (MB)],
+CONVERT(Decimal(15,2),ROUND((a.Size-FILEPROPERTY(a.Name,''SpaceUsed''))/128.000,2)*100/ROUND(a.Size/128.000,2))
+FROM dbo.sysfiles a (NOLOCK)'
+select * from #TEMPDATAFILES 
+Where [database]in ('filename','database')
+--and path like 'y:%'
+order by 1 asc
+drop table #TEMPDATAFILES
+
+
+
+
+
