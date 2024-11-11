@@ -1,0 +1,127 @@
+-- Quantas bases estão sendo armazenadas em cada disco 
+
+SELECT distinct(disco.Drive) caminho,
+count(*) as QTD
+
+from
+sys.sysaltfiles
+inner join
+sys.sysdatabases
+on
+sysaltfiles.dbid = sysdatabases.dbid
+left join
+(
+select
+LogicalName
+,Drive
+,FreeSpaceInMB / 1024 FreeSpaceInMB
+,TotalSpaceInMB / 1024 TotalSpaceInMB
+,((TotalSpaceInMB - FreeSpaceInMB) / TotalSpaceInMB)* 100 '%'
+from
+(
+SELECT DISTINCT
+dovs .logical_volume_name AS LogicalName,
+dovs .volume_mount_point AS Drive,
+cast(CONVERT (bigint , dovs . available_bytes /1048576.0 ) as decimal( 10 ,2 )) AS FreeSpaceInMB ,
+cast(CONVERT (bigint ,( dovs . total_bytes )/1048576.0 ) as decimal( 10 ,2 )) TotalSpaceInMB
+FROM
+sys . master_files mf
+CROSS APPLY
+sys. dm_os_volume_stats (mf .database_id, mf.FILE_ID ) dovs
+) disco
+) disco
+on
+(LEN(sysaltfiles.filename) - LEN(REPLACE(sysaltfiles.filename,disco.Drive,''))) = LEN(disco.Drive)
+-- disco.Drive = replace(substring (sysaltfiles.filename, 1,CHARINDEX ('' , sysaltfiles.filename ,5 )),'_data', '')
+where growth >0
+and disco.Drive not like '%temp%' and disco.Drive not like '%log%'
+group by disco.Drive
+
+#######################################################################################################
+
+
+IF OBJECT_ID('TEMPDB..#AUTO_GROWTH') IS NOT NULL DROP TABLE #AUTO_GROWTH
+;WITH CTE AS (
+SELECT A.NAME AS [BD]
+,B.NAME AS [DATAFILE]
+,DOVS.VOLUME_MOUNT_POINT AS UNIDADE
+,B.GROUPID
+,CASE WHEN B.GROWTH < 1 THEN 0 ELSE SUM(1) END AS GROWTH
+FROM MASTER.DBO.SYSDATABASES A
+LEFT JOIN MASTER.DBO.SYSALTFILES B ON A.DBID = B.DBID
+INNER JOIN MASTER.SYS.DATABASES S ON S.DATABASE_ID=B.DBID
+CROSS APPLY SYS.DM_OS_VOLUME_STATS (A.DBID, B.FILEID ) DOVS
+WHERE S.STATE_DESC = 'ONLINE' AND S.DATABASE_ID > 4
+GROUP BY A.NAME,B.FILENAME,B.NAME, B.GROUPID,DOVS.VOLUME_MOUNT_POINT,B.GROWTH)
+
+SELECT BD
+,UNIDADE
+,GROUPID
+,COUNT(GROWTH) AS QUANTIDADE_DATAFILES
+,SUM(GROWTH) OVER (PARTITION BY BD,UNIDADE,GROUPID,GROWTH) AS BD_GROWTH
+INTO #AUTO_GROWTH
+FROM CTE
+GROUP BY BD,UNIDADE,GROUPID,GROWTH
+ORDER BY BD,GROUPID
+
+SELECT DISTINCT(BD) AS DATABASE_NAME
+FROM #AUTO_GROWTH
+GROUP BY BD, GROUPID
+HAVING SUM(BD_GROWTH) < 1 --> QUANTIDADE DE DATAFILES COM AUTOGROWTH POR DISCO
+
+#######################################################################################################
+
+-- Verificar quais arquivis estão crescendo em um determinado disco
+
+select
+@@SERVERNAME ServerName,
+@@SERVICENAME ServiceName,
+sysdatabases.name db_name ,
+(cast(size as bigint) * cast(8 as bigint) /1024 ) AS tamanho ,
+sysaltfiles.filename caminho,
+case
+when len (replace ( sysaltfiles .filename ,'ldf', '')) <> LEN (sysaltfiles .filename) then 'log'
+else 'dados' end tipo
+
+from
+sys.sysaltfiles
+inner join
+sys.sysdatabases
+on
+sysaltfiles.dbid = sysdatabases.dbid
+left join
+(
+select
+LogicalName
+,Drive
+,FreeSpaceInMB / 1024 FreeSpaceInMB
+,TotalSpaceInMB / 1024 TotalSpaceInMB
+,((TotalSpaceInMB - FreeSpaceInMB) / TotalSpaceInMB)* 100 '%'
+from
+(
+SELECT DISTINCT
+dovs.logical_volume_name AS LogicalName,
+dovs.volume_mount_point AS Drive,
+cast(CONVERT (bigint , dovs . available_bytes /1048576.0 ) as decimal( 10 ,2 )) AS FreeSpaceInMB ,
+cast(CONVERT (bigint ,( dovs . total_bytes )/1048576.0 ) as decimal( 10 ,2 )) TotalSpaceInMB
+FROM
+sys.master_files mf
+CROSS APPLY
+sys. dm_os_volume_stats (mf .database_id, mf.FILE_ID ) dovs
+) disco
+) disco
+on
+(LEN(sysaltfiles.filename) - LEN(REPLACE(sysaltfiles.filename,disco.Drive,''))) = LEN(disco.Drive)
+-- disco.Drive = replace(substring (sysaltfiles.filename, 1,CHARINDEX ('' , sysaltfiles.filename ,5 )),'_data', '')
+where disco.Drive='M:\DADOS06\' and growth >0
+order by db_name
+
+
+
+
+
+
+
+
+
+
