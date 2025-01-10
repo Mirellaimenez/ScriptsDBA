@@ -1,0 +1,147 @@
+-- Validar espaço no disco 
+
+SELECT [CAMINHO],
+[TOTALSPACE],
+[FREESPACE],
+[%_FREE],
+[QTD _DATAFILES _GROWTH ],
+CONVERT(DECIMAL(10), ([TOTALSPACE ]*0.2)- [FREESPACE ]+ [TOTALSPACE ]) [NOVO _TAMANHO_20% ],
+CONVERT(DECIMAL(10), ([TOTALSPACE ]*0.2)- [FREESPACE ]) [ACRESCENTAR ]
+FROM
+(SELECT DISTINCT(DISCO.DRIVE) [CAMINHO ],
+CONVERT(DECIMAL(10), MAX(TOTALSPACEINMB)) [TOTALSPACE ],
+CONVERT(DECIMAL(10), MAX(FREESPACEINMB)) [FREESPACE ],
+CONVERT(DECIMAL(10, 2), MAX(FREESPACEINMB)*100/MAX(TOTALSPACEINMB)) [%_FREE ],
+COUNT(*) AS [QTD _DATAFILES _GROWTH ]
+FROM SYS.SYSALTFILES
+INNER JOIN SYS.SYSDATABASES ON SYSALTFILES.DBID = SYSDATABASES.DBID
+LEFT JOIN
+(SELECT LOGICALNAME,
+DRIVE,
+FREESPACEINMB / 1024 FREESPACEINMB,
+TOTALSPACEINMB / 1024 TOTALSPACEINMB,
+((TOTALSPACEINMB - FREESPACEINMB) / TOTALSPACEINMB)* 100 '%'
+FROM
+(SELECT DISTINCT DOVS .LOGICAL_VOLUME_NAME AS LOGICALNAME,
+DOVS .VOLUME_MOUNT_POINT AS DRIVE,
+CAST(CONVERT (BIGINT , DOVS.AVAILABLE_BYTES /1048576.0) AS DECIMAL(10, 2)) AS FREESPACEINMB,
+CAST(CONVERT (BIGINT ,(DOVS.TOTAL_BYTES)/1048576.0) AS DECIMAL(10, 2)) TOTALSPACEINMB
+FROM SYS.MASTER_FILES MF CROSS APPLY SYS.DM_OS_VOLUME_STATS (MF.DATABASE_ID, MF.FILE_ID) DOVS) DISCO) DISCO ON (LEN(SYSALTFILES.FILENAME) - LEN(REPLACE(SYSALTFILES.FILENAME, DISCO.DRIVE, ''))) = LEN(DISCO.DRIVE)
+WHERE GROWTH >0
+--AND DISCO.DRIVE NOT LIKE '%temp%'
+--AND DISCO.DRIVE NOT LIKE '%log%'
+GROUP BY DISCO.DRIVE) tab
+-- Na linha abaixo, colocamos os discos que não serão apresentados no resultado
+where caminho not in ('disk')
+order by 3 desc
+
+
+-- Ver tamanho das bases e espaço livre dentro delas
+
+CREATE TABLE #FileSize
+(
+    dbName NVARCHAR(128), 
+    CurrentSizeMB DECIMAL(10,2), 
+    FreeSpaceMB DECIMAL(10,2)
+);
+
+INSERT INTO #FileSize(dbName, CurrentSizeMB, FreeSpaceMB)
+EXEC sp_msforeachdb 
+'USE [?]; 
+ INSERT INTO #FileSize(dbName, CurrentSizeMB, FreeSpaceMB)
+ SELECT 
+    dbName, 
+    SUM(CurrentSizeMB) AS CurrentSizeMB,  
+    SUM(FreeSpaceMB) AS FreeSpaceMB
+ FROM (
+    SELECT 
+        DB_NAME() AS dbName, 
+        size / 128.0 AS CurrentSizeMB,  
+        size / 128.0 - CAST(FILEPROPERTY(name, ''SpaceUsed'') AS INT) / 128.0 AS FreeSpaceMB
+    FROM sys.database_files
+ ) AS FileSizes
+ GROUP BY dbName';
+
+SELECT * 
+FROM #FileSize
+WHERE dbName NOT IN ('distribution', 'master', 'model', 'msdb')
+ORDER BY 2 desc, 3
+
+DROP TABLE #FileSize;
+
+
+
+--Criação de novos datafiles
+
+declare @newFile varchar(255) = 'disk'
+
+drop table if exists #temp
+
+create table #temp (dbname varchar(100), groupName varchar(100), groupid int)
+
+insert into #temp
+EXEC sp_MSforeachdb 'USE ? SELECT distinct ''?'', FILEGROUP_NAME(groupid), groupid
+from sys.sysaltfiles a 
+where a.fileid = (SELECT MAX(b.fileid) from sys.sysaltfiles b where a.dbid = b.dbid and a.groupid = b.groupid)'
+
+select '--ALTER DATABASE ['+DB_NAME(a.dbid)+'] ADD FILE ( NAME = N'''+a.name+''', FILENAME = N'''+@newFile+'\'+a.name+'.ndf'', SIZE = 102400KB , FILEGROWTH = 524288KB ) TO FILEGROUP ['+t.groupName+']'	
+from sys.sysaltfiles a 
+inner join #temp t on t.dbname = DB_NAME(a.dbid) and t.groupid = a.groupid
+where --DB_NAME(a.dbid) = 'acessogvpan' and 
+a.fileid = (SELECT MAX(b.fileid) from sys.sysaltfiles b where a.dbid = b.dbid and a.groupid = b.groupid)
+and dbid > 4 and filename not like 'C:\%' and a.groupid > 0
+order by DB_NAME(a.dbid)
+
+
+-- Ativar / Desativar Growth
+
+IF EXISTS (SELECT * FROM tempdb.sys.all_objects WHERE name LIKE '#TABLE_DATAFILES%' )
+drop table #TABLE_DATAFILES
+SELECT a.name AS [BD]
+,b.filename as [UNIDADE]
+,SUM(b.size/128) as [SIZE MB]
+,b.name as DATAFILE
+,case when growth > 0 then 1 else 0 end GROWTH
+,case when len (replace ( b .filename ,'ldf', '')) <> LEN (b .filename) then 'log' else 'dados' end TIPO
+INTO #TABLE_DATAFILES
+from master..sysdatabases a
+left join master..sysaltfiles b on a.dbid = b.dbid
+WHERE b.filename like 'disk'
+group by a.name,b.filename,b.name, growth order by 5,1
+SELECT *
+,'ALTER DATABASE ['+BD+'] MODIFY FILE ( NAME = N'''+datafile+''', FILEGROWTH = 0)' as [DESATIVAR GROWTH]
+,'ALTER DATABASE ['+BD+'] MODIFY FILE ( NAME = N'''+datafile+''', FILEGROWTH = 524288KB )' as [ATIVAR GROWTH]
+FROM #TABLE_DATAFILES
+WHERE GROWTH = 1
+
+
+--VALIDA SE TEM ALGUMA BASE COM FILEGROUP SEM CRESCIMENTO 
+
+IF OBJECT_ID('TEMPDB..#AUTO_GROWTH') IS NOT NULL DROP TABLE #AUTO_GROWTH
+;WITH CTE AS (
+SELECT A.NAME AS [BD]
+,B.NAME AS [DATAFILE]
+,DOVS.VOLUME_MOUNT_POINT AS UNIDADE
+,B.GROUPID
+,CASE WHEN B.GROWTH < 1 THEN 0 ELSE SUM(1) END AS GROWTH
+FROM MASTER.DBO.SYSDATABASES A
+LEFT JOIN MASTER.DBO.SYSALTFILES B ON A.DBID = B.DBID
+INNER JOIN MASTER.SYS.DATABASES S ON S.DATABASE_ID=B.DBID
+CROSS APPLY SYS.DM_OS_VOLUME_STATS (A.DBID, B.FILEID ) DOVS
+WHERE S.STATE_DESC = 'ONLINE' AND S.DATABASE_ID > 4
+GROUP BY A.NAME,B.FILENAME,B.NAME, B.GROUPID,DOVS.VOLUME_MOUNT_POINT,B.GROWTH)
+
+SELECT BD
+,UNIDADE
+,GROUPID
+,COUNT(GROWTH) AS QUANTIDADE_DATAFILES
+,SUM(GROWTH) OVER (PARTITION BY BD,UNIDADE,GROUPID,GROWTH) AS BD_GROWTH
+INTO #AUTO_GROWTH
+FROM CTE
+GROUP BY BD,UNIDADE,GROUPID,GROWTH
+ORDER BY BD,GROUPID
+
+SELECT DISTINCT(BD) AS DATABASE_NAME
+FROM #AUTO_GROWTH
+GROUP BY BD, GROUPID
+HAVING SUM(BD_GROWTH) < 1 --> QUANTIDADE DE DATAFILES COM AUTOGROWTH POR DISCO
