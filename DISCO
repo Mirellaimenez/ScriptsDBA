@@ -2,7 +2,6 @@
 
 SELECT distinct(disco.Drive) caminho,
 count(*) as QTD
-
 from
 sys.sysaltfiles
 inner join
@@ -39,7 +38,6 @@ group by disco.Drive
 
 #######################################################################################################
 
-
 IF OBJECT_ID('TEMPDB..#AUTO_GROWTH') IS NOT NULL DROP TABLE #AUTO_GROWTH
 ;WITH CTE AS (
 SELECT A.NAME AS [BD]
@@ -71,7 +69,7 @@ HAVING SUM(BD_GROWTH) < 1 --> QUANTIDADE DE DATAFILES COM AUTOGROWTH POR DISCO
 
 #######################################################################################################
 
--- Verificar quais arquivis estão crescendo em um determinado disco
+-- Verificar quais arquivos estão crescendo em um determinado disco
 
 select
 @@SERVERNAME ServerName,
