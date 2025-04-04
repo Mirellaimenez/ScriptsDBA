@@ -1,0 +1,4 @@
+-- Verificação de qual instâncias pertencem ao cluster e  qual é o owner
+
+SELECT NodeName, status_description, is_current_owner
+FROM sys.dm_os_cluster_nodes WITH (NOLOCK) OPTION (RECOMPILE);
