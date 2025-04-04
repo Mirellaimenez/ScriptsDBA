@@ -1,0 +1,94 @@
+-- Verifica qual serviço está consumindo mais CPU 
+
+DECLARE @ts_now bigint
+SELECT @ts_now = cpu_ticks / (cpu_ticks/ms_ticks) FROM sys.dm_os_sys_info
+SELECT top 1000 record_id, EventTime,
+CASE WHEN system_cpu_utilization_post_sp2 IS NOT NULL THEN system_cpu_utilization_post_sp2 ELSE system_cpu_utilization_pre_sp2 END AS system_cpu_utilization,
+CASE WHEN sql_cpu_utilization_post_sp2 IS NOT NULL THEN sql_cpu_utilization_post_sp2 ELSE sql_cpu_utilization_pre_sp2 END AS sql_cpu_utilization
+FROM(SELECT record.value('(Record/@id)[1]', 'int') AS record_id,
+DATEADD (ms, -1 * (@ts_now - [timestamp]), GETDATE()) AS EventTime,
+100-record.value('(Record/SchedulerMonitorEvent/SystemHealth/SystemIdle)[1]', 'int') AS system_cpu_utilization_post_sp2,
+record.value('(Record/SchedulerMonitorEvent/SystemHealth/ProcessUtilization)[1]', 'int') AS sql_cpu_utilization_post_sp2 ,
+100-record.value('(Record/SchedluerMonitorEvent/SystemHealth/SystemIdle)[1]', 'int') AS system_cpu_utilization_pre_sp2,
+record.value('(Record/SchedluerMonitorEvent/SystemHealth/ProcessUtilization)[1]', 'int') AS sql_cpu_utilization_pre_sp2
+FROM (SELECT timestamp, CONVERT (xml, record) AS record
+FROM sys.dm_os_ring_buffers
+WHERE ring_buffer_type = 'RING_BUFFER_SCHEDULER_MONITOR'
+AND record LIKE '%SystemHealth%') AS t) AS t
+ORDER BY record_id desc
+
+
+--- Consumo de CPU por BASE
+
+WITH DB_CPU_Stats
+AS
+(SELECT DatabaseID, DB_Name(DatabaseID) AS [DatabaseName], SUM(total_worker_time) AS [CPU_Time_Ms]
+FROM sys.dm_exec_query_stats AS qs
+CROSS APPLY (SELECT CONVERT(int, value) AS [DatabaseID]
+FROM sys.dm_exec_plan_attributes(qs.plan_handle)
+WHERE attribute = N'dbid') AS F_DB
+GROUP BY DatabaseID)
+SELECT ROW_NUMBER() OVER(ORDER BY [CPU_Time_Ms] DESC) AS [row_num],
+DatabaseName, [CPU_Time_Ms],
+CAST([CPU_Time_Ms] * 1.0 / SUM([CPU_Time_Ms]) OVER() * 100.0 AS DECIMAL(5, 2)) AS [CPUPercent]
+FROM DB_CPU_Stats
+WHERE DatabaseID > 4 -- system databases
+AND DatabaseID <> 32767 -- ResourceDB
+ORDER BY row_num OPTION (RECOMPILE);
+
+
+-- Localiza consultas atuais em execução, bloqueio, waiting, CPU
+
+SELECT s.session_id
+    ,r.STATUS
+    ,r.blocking_session_id AS 'blocked_by'
+    ,r.wait_type
+    ,r.wait_resource
+    ,CONVERT(VARCHAR, DATEADD(ms, r.wait_time, 0), 8) AS 'wait_time'
+    ,r.cpu_time
+    ,r.logical_reads
+    ,r.reads
+    ,r.writes
+    ,CONVERT(VARCHAR, DATEADD(ms, r.total_elapsed_time, 0), 8) AS 'elapsed_time'
+    ,CAST((
+            '<?query --  ' + CHAR(13) + CHAR(13) + Substring(st.TEXT, (r.statement_start_offset / 2) + 1, (
+                    (
+                        CASE r.statement_end_offset
+                            WHEN - 1
+                                THEN Datalength(st.TEXT)
+                            ELSE r.statement_end_offset
+                            END - r.statement_start_offset
+                        ) / 2
+                    ) + 1) + CHAR(13) + CHAR(13) + '--?>'
+            ) AS XML) AS 'query_text'
+    ,COALESCE(QUOTENAME(DB_NAME(st.dbid)) + N'.' + QUOTENAME(OBJECT_SCHEMA_NAME(st.objectid, st.dbid)) + N'.' + QUOTENAME(OBJECT_NAME(st.objectid, st.dbid)), '') AS 'stored_proc'
+    --,qp.query_plan AS 'xml_plan'  -- uncomment (1) if you want to see plan
+    ,r.command
+    ,s.login_name
+    ,s.host_name
+    ,s.program_name
+    ,s.host_process_id
+    ,s.last_request_end_time
+    ,s.login_time
+    ,r.open_transaction_count
+FROM sys.dm_exec_sessions AS s
+INNER JOIN sys.dm_exec_requests AS r ON r.session_id = s.session_id
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) AS st
+--OUTER APPLY sys.dm_exec_query_plan(r.plan_handle) AS qp -- uncomment (2) if you want to see plan
+WHERE r.wait_type NOT LIKE 'SP_SERVER_DIAGNOSTICS%'
+    OR r.session_id != @@SPID
+ORDER BY r.cpu_time DESC
+    ,r.STATUS
+    ,r.blocking_session_id
+    ,s.session_id
+
+
+
+
+
+
+
+
+
+
+
