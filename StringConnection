@@ -1,0 +1,19 @@
+Los pckgs e string connections 
+
+USE SSISDB;
+GO
+
+SELECT  distinct 
+    f.name AS FolderName,  
+    p.name AS ProjectName,  
+    pk.name AS PackageName,
+    CAST(op.design_default_value AS NVARCHAR(MAX)) AS ConnectionString
+FROM internal.object_parameters op
+JOIN internal.packages pk ON op.object_name = pk.name AND op.project_id = pk.project_id  
+JOIN internal.projects p ON pk.project_id = p.project_id  
+JOIN internal.folders f ON p.folder_id = f.folder_id  
+WHERE op.parameter_name LIKE '%ConnectionString%'  
+AND  (CAST(op.design_default_value AS NVARCHAR(MAX)) LIKE '%Catalog=base%' OR
+      CAST(op.design_default_value AS NVARCHAR(MAX)) LIKE '%Catalog=base%')
+AND (CAST(op.design_default_value AS NVARCHAR(MAX)) LIKE '%PANDB2513%' OR  CAST(op.design_default_value AS NVARCHAR(MAX)) LIKE '%DBP%') 
+ORDER BY 1,2,3
