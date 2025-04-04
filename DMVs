@@ -1,0 +1,23 @@
+-- Fornece estatísticas de desempenho de consultas, como tempo de CPU, leituras lógicas e escritas lógicas
+sys.dm_exec_query_stats
+
+-- Retorna o texto SQL de uma consulta específica.
+
+sys.dm_exec_sql_text
+
+-- Retorna o plano de execução de uma consulta.
+
+sys.dm_exec_query_plan
+
+-- Mostra informações sobre as solicitações atualmente em execução, incluindo bloqueios.
+
+sys.dm_exec_requests
+
+-- Fornece estatísticas de uso de índices, ajudando a identificar índices que não estão sendo utilizados.
+
+sys.dm_db_index_usage_stats
+
+-- Mostra estatísticas de espera, ajudando a identificar gargalos de recursos.
+
+sys.dm_os_wait_stats
+
