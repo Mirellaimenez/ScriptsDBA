@@ -1,0 +1,107 @@
+-- As queries abaixo utilizam traces para análise 
+
+
+--	Pegar as queries do Traces:
+
+--	Queries que mais demoram
+select *
+from Traces..Traces
+order by duration desc
+
+--	Queries que mais se repetem
+select *
+from Traces..Traces
+order by textdata desc
+
+--	Queries que mais fazem READS
+select *
+from Traces..Traces
+order by reads desc
+
+--	Se preciso, queries que mais consomem CPU. Normalmente só os 3 primeiros já identificam as piores queries.
+select *
+from Traces..Traces
+order by CPU desc
+
+--	Em seguida você deve analisar essas queries para poder melhorar.
+
+--	Sempre habilite o Ctrl + M e o SET STATISTICS IO ON
+set statistics io on
+
+--	Executar a query, analisar o executio plan e a aba Messages
+select *
+from TestesIndices
+where COd = 1235
+
+--	Caso o SQL não sugira um índice, você pode:
+--		- Analisar o Execution plan da query e ver se consegue criar um índice melhor do que o índice que o SQL escolheu para essa query
+--		- Analisar a query e ver se ela pode ser feita de outra forma (sub-queries, conversão implicita, funções na cláusula WHERE e etc).  
+--		- Validar se a query tem filtros o suficiente. Se uma query da um join de 5 tabelas e coloca filtros pequenos que fazem ela 
+--		  retorrar quase toda a tabela, nesse caso não resta muita coisa a se fazer a não ser mandar a query para avaliação do desenvolvedor.
+
+
+
+--	Essa query voce pode ordenar por leitura(num_of_reads) e/ou escrita (num_of_writes) para analisar os arquivos que mais 
+--	possuem determinado tipo de operação
+SELECT
+	DB_NAME(mf.database_id) AS databaseName,
+	name AS File_LogicalName,
+	CASE
+	WHEN type_desc = 'LOG' THEN 'Log File'
+	WHEN type_desc = 'ROWS' THEN 'Data File'
+	ELSE type_desc
+	END AS File_type_desc
+	,mf.physical_name
+	,num_of_reads
+	,num_of_bytes_read
+	,io_stall_read_ms
+	,num_of_writes
+	,num_of_bytes_written
+	,io_stall_write_ms
+	,io_stall
+	,size_on_disk_bytes
+	,size_on_disk_bytes/ 1024 AS size_on_disk_KB
+	,size_on_disk_bytes/ 1024 / 1024 AS size_on_disk_MB
+	,size_on_disk_bytes/ 1024 / 1024 / 1024 AS size_on_disk_GB
+FROM sys.dm_io_virtual_file_stats(NULL, NULL) AS divfs
+JOIN sys.master_files AS mf ON mf.database_id = divfs.database_id
+AND mf.FILE_ID = divfs.FILE_ID
+ORDER BY num_of_Reads + num_of_writes DESC
+
+
+
+
+
+---------------------------------------------------------------------------------------------------------------------
+--	7.2.3)	TOP 50 queries com mais leituras (total_physical_reads + total_logical_reads + total_logical_writes)
+--------------------------------------------------------------------------------------------------------------------------------
+if object_id('tempdb..#Temp_Trace') is not null drop table #Temp_Trace
+
+SELECT TOP 50  total_physical_reads + total_logical_reads + total_logical_writes IO,
+ sql_handle,execution_count,last_execution_time,last_worker_time,total_worker_time
+into #Temp_Trace
+FROM sys.dm_exec_query_stats A
+where last_elapsed_time > 20	
+ORDER BY A.total_physical_reads + A.total_logical_reads + A.total_logical_writes DESC
+
+select distinct *
+from #Temp_Trace A
+cross apply sys.dm_exec_sql_text (sql_handle)
+order by 1 desc
+
+--------------------------------------------------------------------------------------------------------------------------------
+--	7.2.4)	TOP 50 queries com maior consumo de CPU
+--------------------------------------------------------------------------------------------------------------------------------
+if object_id('tempdb..#Temp_Trace') is not null drop table #Temp_Trace
+
+SELECT TOP 50 total_worker_time ,  sql_handle,execution_count,last_execution_time,last_worker_time
+into #Temp_Trace
+FROM sys.dm_exec_query_stats A
+--where last_elapsed_time > 20
+	--and last_execution_time > dateadd(ss,-600,getdate()) --ultimos 5 min
+order by A.total_worker_time desc
+
+select distinct *
+from #Temp_Trace A
+cross apply sys.dm_exec_sql_text (sql_handle)
+order by 1 DESC
