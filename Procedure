@@ -1,0 +1,3 @@
+-- Verifica quantas vezes uma procedure foi chamada 
+
+select ORIGEM, * from dba..baseline_procstats where objectname like 'proc%' and dtcoleta > DATEADD(hour, -1, GETDATE()) order by 3 desc
