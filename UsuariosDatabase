@@ -1,0 +1,26 @@
+-- Lista os usuários e permissões de um Database
+
+use database
+
+SELECT 
+    u.name AS username,
+    p.permission_name
+FROM 
+    sys.database_principals u
+JOIN 
+    sys.database_permissions p ON u.principal_id = p.grantee_principal_id
+WHERE 
+     p.permission_name = 'SELECT'
+	 and u.name not like  '%public%'
+ORDER BY 
+    u.name;
+
+
+-- Verifica Login 
+
+
+SELECT  s.Name, u.*
+FROM    sys.schemas s
+        INNER JOIN sys.sysusers u
+            ON u.uid = s.principal_id
+			where u.name = 'user'
