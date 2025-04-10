@@ -1,4 +1,4 @@
--- Quantas bases estão sendo armazenadas em cada disco 
+-- Discos que possuem datafiles
 
 SELECT distinct(disco.Drive) caminho,
 count(*) as QTD
